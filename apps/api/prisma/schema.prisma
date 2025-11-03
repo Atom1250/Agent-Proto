@@ -1,0 +1,128 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model organization {
+  id          String    @id @default(cuid())
+  name        String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  clients     client[]
+  templates   onboarding_template[]
+  sessions    session[]
+}
+
+model client {
+  id             String        @id @default(cuid())
+  organization   organization? @relation(fields: [organizationId], references: [id])
+  organizationId String?
+  name           String
+  email          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  sessions       session[]
+}
+
+model onboarding_template {
+  id             String        @id @default(cuid())
+  organization   organization? @relation(fields: [organizationId], references: [id])
+  organizationId String?
+  key            String        @unique
+  name           String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  slots          slot[]
+  sessions       session[]
+}
+
+model slot {
+  id          String               @id @default(cuid())
+  template    onboarding_template  @relation(fields: [templateId], references: [id])
+  templateId  String
+  key         String
+  label       String
+  type        String               @default("text")
+  required    Boolean              @default(false)
+  order       Int                  @default(0)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@unique([templateId, key])
+}
+
+model session {
+  id             String               @id @default(cuid())
+  organization   organization?        @relation(fields: [organizationId], references: [id])
+  organizationId String?
+  client         client?              @relation(fields: [clientId], references: [id])
+  clientId       String?
+  template       onboarding_template? @relation(fields: [templateId], references: [id])
+  templateId     String?
+  status         String               @default("active")
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  messages       message[]
+  responses      response[]
+  attachments    attachment[]
+  sessionTags    session_tag[]
+}
+
+model message {
+  id         String   @id @default(cuid())
+  session    session  @relation(fields: [sessionId], references: [id])
+  sessionId  String
+  role       String   // e.g., 'user' | 'assistant' | 'system'
+  content    String
+  createdAt  DateTime @default(now())
+}
+
+model response {
+  id         String   @id @default(cuid())
+  session    session  @relation(fields: [sessionId], references: [id])
+  sessionId  String
+  slotKey    String
+  value      Json?
+  createdAt  DateTime @default(now())
+
+  @@unique([sessionId, slotKey])
+}
+
+model attachment {
+  id         String   @id @default(cuid())
+  session    session? @relation(fields: [sessionId], references: [id])
+  sessionId  String?
+  message    message? @relation(fields: [messageId], references: [id])
+  messageId  String?
+  url        String
+  mimeType   String?
+  createdAt  DateTime @default(now())
+}
+
+model tag {
+  id        String        @id @default(cuid())
+  key       String        @unique
+  label     String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  sessionTags session_tag[]
+}
+
+model session_tag {
+  session   session @relation(fields: [sessionId], references: [id])
+  sessionId String
+  tag       tag     @relation(fields: [tagId], references: [id])
+  tagId     String
+
+  @@id([sessionId, tagId])
+}
+

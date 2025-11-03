@@ -1,0 +1,35 @@
+You are implementing tasks one block at a time. Rules:
+
+- Use TypeScript everywhere. Package manager: pnpm.
+- Repo style: monorepo with pnpm workspaces: apps/web (Next.js), apps/api (Fastify or Express), packages/shared (types), packages/config (eslint/tsconfig).
+- Minimize churn: create only files listed in each block. Keep diffs tight.
+- Provide a concise change summary and how to run after each block.
+- Prefer OpenAI Responses API with Structured Outputs for schema‑true JSON (enforce JSON Schema via Structured Outputs).
+- For voice, follow OpenAI Realtime/WebRTC with ephemeral tokens minted server‑side. Don’t expose the standard API key in the browser.
+- Default to clean architecture: controllers → services → data → shared types.
+- Add modest tests as you go (Jest + supertest / Playwright).
+
+OpenAI integration guidelines:
+- Primary text interface: OpenAI Responses API.
+- Structured Outputs: enforce JSON Schema using Structured Outputs.
+- Realtime + WebRTC & ephemeral tokens (for voice) per OpenAI Realtime API.
+- Text‑to‑Speech (TTS) for spoken replies per OpenAI TTS guide.
+- Speech‑to‑Text (STT), e.g., gpt‑4o‑mini‑transcribe, per OpenAI model & audio docs.
+- Use server‑side token minting for ephemeral Realtime access; never ship permanent API keys to the client.
+
+Engineering conventions:
+- Clean architecture layering: controllers (HTTP) → services (business) → data (persistence/clients) → shared types.
+- packages/shared holds types shared across apps and services.
+- packages/config holds eslint and tsconfig bases consumed by all packages.
+- Each package/app has its own tsconfig.json extending packages/config.
+- Linting via ESLint; format via Prettier if added; keep configs centralized.
+- Prefer environment‑based configuration; ship an .env.example at root.
+
+Tooling:
+- Use pnpm workspaces; run scripts via pnpm -r where possible.
+- Dev script should run web and api concurrently.
+- Add Docker compose with PostgreSQL + pgAdmin for local dev.
+
+Security:
+- Do not expose secrets client‑side; use server routes to mint ephemeral tokens for Realtime.
+- Validate and narrow Structured Outputs to known JSON Schemas.

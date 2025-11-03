@@ -1,0 +1,23 @@
+{
+  "extends": "../../packages/config/tsconfig/tsconfig.next.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "noEmit": true,
+    "incremental": true,
+    "esModuleInterop": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

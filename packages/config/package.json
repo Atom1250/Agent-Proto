@@ -1,0 +1,13 @@
+{
+  "name": "@agent-proto/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./eslint/base": "./eslint/base.cjs",
+    "./tsconfig/base": "./tsconfig/tsconfig.base.json",
+    "./tsconfig/node": "./tsconfig/tsconfig.node.json",
+    "./tsconfig/next": "./tsconfig/tsconfig.next.json"
+  }
+}
+
