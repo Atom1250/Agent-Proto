@@ -74,7 +74,7 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get<{ Querystring: SessionsQuery }>('/admin/sessions', async (req) => {
+  app.get<{ Querystring: SessionsQuery }>('/sessions', async (req) => {
     const { templateId, status, startedAfter, startedBefore } = req.query ?? {};
 
     const where: Parameters<typeof prisma.session.findMany>[0]['where'] = {};
@@ -159,7 +159,7 @@ export async function adminRoutes(app: FastifyInstance) {
     };
   });
 
-  app.get<{ Params: { id: string } }>('/admin/sessions/:id/responses', async (req, reply) => {
+  app.get<{ Params: { id: string } }>('/sessions/:id/responses', async (req, reply) => {
     const { id } = req.params;
 
     const session = await prisma.session.findUnique({
@@ -260,7 +260,7 @@ export async function adminRoutes(app: FastifyInstance) {
     };
   });
 
-  app.get<{ Params: { id: string } }>('/admin/attachments/:id/download', async (req, reply) => {
+  app.get<{ Params: { id: string } }>('/attachments/:id/download', async (req, reply) => {
     const { id } = req.params;
 
     try {
@@ -282,7 +282,7 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get<{ Querystring: { sessionId?: string } }>('/admin/export', async (req, reply) => {
+  app.get<{ Querystring: { sessionId?: string } }>('/export', async (req, reply) => {
     const sessionId = req.query.sessionId;
 
     if (!sessionId) {

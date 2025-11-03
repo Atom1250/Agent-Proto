@@ -31,7 +31,7 @@ async function buildServer() {
 
   app.register(async (v1) => {
     await sessionsRoutes(v1);
-    await adminRoutes(v1);
+    await v1.register(adminRoutes, { prefix: '/admin' });
     await realtimeRoutes(v1);
   }, { prefix: '/v1' });
 

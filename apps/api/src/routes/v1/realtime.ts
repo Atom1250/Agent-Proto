@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 type EphemeralTokenResponse = {
   token: string;
   expiresAt: string;
+  model: string;
 };
 
 type OpenAIRealtimeSessionResponse = {
@@ -54,7 +55,7 @@ export async function realtimeRoutes(app: FastifyInstance) {
         return;
       }
 
-      reply.send({ token, expiresAt: new Date(expiresAt * 1000).toISOString() });
+      reply.send({ token, expiresAt: new Date(expiresAt * 1000).toISOString(), model: OPENAI_REALTIME_MODEL });
     } catch (error) {
       req.log.error({ err: error }, 'error creating realtime session');
       reply.code(502).send({ error: 'upstream_failure' });
