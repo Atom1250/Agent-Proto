@@ -9,6 +9,8 @@ import { applyStructuredOutput } from '../../lib/structuredOutput';
 
 const attachmentService = getAttachmentService();
 
+const attachmentService = getAttachmentService();
+
 export async function sessionsRoutes(app: FastifyInstance) {
   app.post<{ Body: { clientId: string; templateId: string } }>('/sessions', async (req, reply) => {
     const { clientId, templateId } = req.body ?? {};
