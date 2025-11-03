@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { StructuredOutput } from '@agent-proto/shared';
 import Link from 'next/link';
 
 import { apiUrl } from '../../../lib/api';
@@ -13,6 +14,15 @@ type PageProps = {
 type EphemeralTokenResponse = {
   token?: string;
   expiresAt?: string;
+};
+
+type VoiceTurnPayload = {
+  eventId?: string;
+  role: 'user' | 'assistant';
+  transcript: string;
+  audioUrl?: string | null;
+  audioId?: string | null;
+  structuredOutput?: StructuredOutput | null;
 };
 
 const pageStyle: CSSProperties = {
@@ -84,6 +94,154 @@ const audioContainerStyle: CSSProperties = {
 const AUDIO_MODEL = 'gpt-4o-realtime-preview';
 const REALTIME_URL = `https://api.openai.com/v1/realtime?model=${AUDIO_MODEL}`;
 
+function normalizeStructuredOutput(value: unknown): StructuredOutput | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const rawSlotUpdates = record.slot_updates ?? record.slotUpdates ?? [];
+  const slotUpdates = Array.isArray(rawSlotUpdates)
+    ? rawSlotUpdates
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') {
+            return null;
+          }
+          const slotRecord = entry as Record<string, unknown>;
+          const slotKey =
+            typeof slotRecord.slotKey === 'string'
+              ? slotRecord.slotKey
+              : typeof slotRecord.slot_key === 'string'
+                ? slotRecord.slot_key
+                : null;
+          if (!slotKey) {
+            return null;
+          }
+
+          return {
+            slotKey,
+            value: slotRecord.value ?? null,
+          };
+        })
+        .filter((entry): entry is { slotKey: string; value: unknown } => Boolean(entry))
+    : [];
+
+  const rawMissing = record.missing_required_slots ?? record.missingRequiredSlots ?? [];
+  const missingRequiredSlots = Array.isArray(rawMissing)
+    ? rawMissing.filter((slot): slot is string => typeof slot === 'string' && slot.length > 0)
+    : [];
+
+  const nextQuestion =
+    typeof record.next_question === 'string'
+      ? record.next_question
+      : typeof record.nextQuestion === 'string'
+        ? record.nextQuestion
+        : null;
+
+  if (slotUpdates.length === 0 && missingRequiredSlots.length === 0 && !nextQuestion) {
+    return null;
+  }
+
+  return {
+    slot_updates: slotUpdates,
+    missing_required_slots: missingRequiredSlots,
+    next_question: nextQuestion,
+  } satisfies StructuredOutput;
+}
+
+function extractContentDetails(content: unknown): {
+  transcript: string | null;
+  audioUrl: string | null;
+  audioId: string | null;
+  structuredOutput: StructuredOutput | null;
+} {
+  const transcriptSegments: string[] = [];
+  let audioUrl: string | null = null;
+  let audioId: string | null = null;
+  let structuredOutput: StructuredOutput | null = null;
+
+  const visit = (value: unknown) => {
+    if (value === null || value === undefined) {
+      return;
+    }
+    if (typeof value === 'string') {
+      if (value.trim()) {
+        transcriptSegments.push(value.trim());
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value !== 'object') {
+      return;
+    }
+
+    const record = value as Record<string, unknown>;
+    const maybeText = record.text ?? record.message ?? record.value ?? record.output;
+    if (typeof maybeText === 'string' && maybeText.trim()) {
+      transcriptSegments.push(maybeText.trim());
+    }
+    if (typeof record.transcript === 'string' && record.transcript.trim()) {
+      transcriptSegments.push(record.transcript.trim());
+    }
+    if (Array.isArray(record.transcripts)) {
+      record.transcripts.forEach(visit);
+    }
+
+    if (!audioUrl) {
+      const candidate =
+        typeof record.audio_url === 'string'
+          ? record.audio_url
+          : typeof record.url === 'string'
+            ? record.url
+            : typeof record.href === 'string'
+              ? record.href
+              : null;
+      if (candidate && candidate.trim()) {
+        audioUrl = candidate.trim();
+      }
+    }
+
+    const type = typeof record.type === 'string' ? record.type : null;
+    if (!audioId && typeof record.id === 'string' && record.id.trim() && type && type.includes('audio')) {
+      audioId = record.id.trim();
+    }
+
+    if (!structuredOutput && type === 'structured_output') {
+      structuredOutput = normalizeStructuredOutput(record.output ?? record.data ?? record.value ?? null);
+    }
+    if (!structuredOutput && record.structured_output) {
+      structuredOutput = normalizeStructuredOutput(record.structured_output);
+    }
+    if (!structuredOutput && record.output && typeof record.output === 'object') {
+      structuredOutput = normalizeStructuredOutput(record.output);
+    }
+
+    if (record.content) {
+      visit(record.content);
+    }
+    if (record.parts) {
+      visit(record.parts);
+    }
+    if (record.delta) {
+      visit(record.delta);
+    }
+  };
+
+  visit(content);
+
+  const transcript = transcriptSegments.join('\n').trim();
+
+  return {
+    transcript: transcript || null,
+    audioUrl,
+    audioId,
+    structuredOutput,
+  };
+}
+
 export default function VoiceSessionPage({ params }: PageProps) {
   const { sessionId } = params;
   const [connectionStatus, setConnectionStatus] = useState('Initializing…');
@@ -95,6 +253,190 @@ export default function VoiceSessionPage({ params }: PageProps) {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const processedVoiceEventsRef = useRef<Set<string>>(new Set());
+
+  const sendVoiceTurns = useCallback(
+    async (turns: VoiceTurnPayload[]) => {
+      if (turns.length === 0) {
+        return;
+      }
+
+      try {
+        await fetch(apiUrl(`/v1/sessions/${sessionId}/voice-turns`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(turns),
+          keepalive: true,
+        });
+      } catch (err) {
+        console.error('Failed to persist voice turns', err);
+      }
+    },
+    [sessionId],
+  );
+
+  const enqueueVoiceTurns = useCallback(
+    (turns: VoiceTurnPayload | VoiceTurnPayload[]) => {
+      const entries = Array.isArray(turns) ? turns : [turns];
+      const unique: VoiceTurnPayload[] = [];
+
+      entries.forEach((entry) => {
+        if (!entry || typeof entry.transcript !== 'string') {
+          return;
+        }
+
+        const transcript = entry.transcript.trim();
+        if (!transcript) {
+          return;
+        }
+
+        const key = entry.eventId && entry.eventId.trim() ? entry.eventId.trim() : `${entry.role}:${transcript}`;
+        if (processedVoiceEventsRef.current.has(key)) {
+          return;
+        }
+        processedVoiceEventsRef.current.add(key);
+
+        const normalizedEventId = entry.eventId && typeof entry.eventId === 'string' && entry.eventId.trim()
+          ? entry.eventId.trim()
+          : undefined;
+        const normalizedAudioUrl =
+          typeof entry.audioUrl === 'string' && entry.audioUrl.trim() ? entry.audioUrl.trim() : undefined;
+        const normalizedAudioId =
+          typeof entry.audioId === 'string' && entry.audioId.trim() ? entry.audioId.trim() : undefined;
+
+        unique.push({
+          ...entry,
+          eventId: normalizedEventId,
+          transcript,
+          audioUrl: normalizedAudioUrl,
+          audioId: normalizedAudioId,
+          structuredOutput: entry.structuredOutput ?? undefined,
+        });
+      });
+
+      if (unique.length > 0) {
+        void sendVoiceTurns(unique);
+      }
+    },
+    [sendVoiceTurns],
+  );
+
+  const handleRealtimeEvent = useCallback(
+    (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') {
+        return;
+      }
+
+      const record = payload as Record<string, unknown>;
+      const type = typeof record.type === 'string' ? record.type : null;
+      if (!type) {
+        return;
+      }
+
+      if (type === 'conversation.item.completed') {
+        const item = record.item;
+        if (!item || typeof item !== 'object') {
+          return;
+        }
+        const itemRecord = item as Record<string, unknown>;
+        const roleRaw = typeof itemRecord.role === 'string' ? itemRecord.role : null;
+        if (!roleRaw) {
+          return;
+        }
+        const role = roleRaw.toLowerCase() === 'user' ? 'user' : roleRaw.toLowerCase() === 'assistant' ? 'assistant' : null;
+        if (!role) {
+          return;
+        }
+
+        const { transcript, audioUrl, audioId, structuredOutput } = extractContentDetails(itemRecord.content);
+        if (!transcript) {
+          return;
+        }
+
+        const eventId = typeof itemRecord.id === 'string' ? itemRecord.id : undefined;
+        enqueueVoiceTurns({
+          eventId,
+          role,
+          transcript,
+          audioUrl,
+          audioId,
+          structuredOutput,
+        });
+        return;
+      }
+
+      if (type === 'response.completed') {
+        const response = record.response;
+        if (!response || typeof response !== 'object') {
+          return;
+        }
+        const responseRecord = response as Record<string, unknown>;
+        const responseId = typeof responseRecord.id === 'string' ? responseRecord.id : undefined;
+        const outputs = Array.isArray(responseRecord.output)
+          ? responseRecord.output
+          : responseRecord.output
+            ? [responseRecord.output]
+            : [];
+
+        const turns: VoiceTurnPayload[] = [];
+        outputs.forEach((item, index) => {
+          if (!item || typeof item !== 'object') {
+            return;
+          }
+          const itemRecord = item as Record<string, unknown>;
+          const roleRaw = typeof itemRecord.role === 'string' ? itemRecord.role : 'assistant';
+          const role = roleRaw.toLowerCase() === 'user' ? 'user' : 'assistant';
+
+          const { transcript, audioUrl, audioId, structuredOutput } = extractContentDetails(
+            itemRecord.content ?? itemRecord.delta,
+          );
+          if (!transcript) {
+            return;
+          }
+
+          const outputId = typeof itemRecord.id === 'string' ? itemRecord.id : undefined;
+          const eventId = responseId ? `${responseId}:${outputId ?? index}` : outputId;
+
+          turns.push({
+            eventId,
+            role,
+            transcript,
+            audioUrl,
+            audioId,
+            structuredOutput,
+          });
+        });
+
+        if (turns.length > 0) {
+          enqueueVoiceTurns(turns);
+        }
+      }
+    },
+    [enqueueVoiceTurns],
+  );
+
+  const handleDataChannelMessage = useCallback(
+    (data: unknown) => {
+      if (typeof data !== 'string') {
+        return;
+      }
+
+      const lines = data
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+      lines.forEach((line) => {
+        try {
+          const parsed = JSON.parse(line);
+          handleRealtimeEvent(parsed);
+        } catch (error) {
+          // Ignore malformed lines
+        }
+      });
+    },
+    [handleRealtimeEvent],
+  );
 
   const formattedExpiry = useMemo(() => {
     if (!expiresAt) {
@@ -210,7 +552,20 @@ export default function VoiceSessionPage({ params }: PageProps) {
         peerConnection?.addTrack(track, localStream as MediaStream);
       });
 
-      peerConnection.createDataChannel('oai-events');
+      const eventChannel = peerConnection.createDataChannel('oai-events');
+      eventChannel.addEventListener('message', (event) => {
+        handleDataChannelMessage(event.data);
+      });
+
+      peerConnection.addEventListener('datachannel', (event) => {
+        const channel = event.channel;
+        if (channel.label !== 'oai-events') {
+          return;
+        }
+        channel.addEventListener('message', (message) => {
+          handleDataChannelMessage(message.data);
+        });
+      });
 
       setConnectionStatus('Creating session offer…');
 
@@ -244,7 +599,7 @@ export default function VoiceSessionPage({ params }: PageProps) {
     } finally {
       setIsConnecting(false);
     }
-  }, [cleanUpConnections, isConnecting]);
+  }, [cleanUpConnections, handleDataChannelMessage, isConnecting]);
 
   useEffect(() => {
     connectToRealtime();

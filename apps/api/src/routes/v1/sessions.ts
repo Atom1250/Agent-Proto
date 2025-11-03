@@ -1,8 +1,13 @@
 import { FastifyInstance } from 'fastify';
 import { Buffer } from 'node:buffer';
 
+import type { StructuredOutput } from '@agent-proto/shared';
+
 import { getAttachmentService } from '../../lib/attachments';
 import { prisma } from '../../lib/prisma';
+import { applyStructuredOutput } from '../../lib/structuredOutput';
+
+const attachmentService = getAttachmentService();
 
 const attachmentService = getAttachmentService();
 
@@ -130,6 +135,122 @@ export async function sessionsRoutes(app: FastifyInstance) {
       }
       return reply.code(500).send({ error: 'unable to store attachment' });
     }
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body:
+      | {
+          eventId?: string;
+          role?: string;
+          transcript?: string;
+          audioUrl?: string | null;
+          audioId?: string | null;
+          structuredOutput?: StructuredOutput | null;
+        }
+      | Array<{
+          eventId?: string;
+          role?: string;
+          transcript?: string;
+          audioUrl?: string | null;
+          audioId?: string | null;
+          structuredOutput?: StructuredOutput | null;
+        }>;
+  }>('/sessions/:id/voice-turns', async (req, reply) => {
+    const { id } = req.params;
+
+    const session = await prisma.session.findUnique({ where: { id } });
+    if (!session) {
+      return reply.code(404).send({ error: 'session not found' });
+    }
+
+    const payload = Array.isArray(req.body) ? req.body : req.body ? [req.body] : [];
+    if (payload.length === 0) {
+      return reply.code(400).send({ error: 'voice turn payload missing' });
+    }
+
+    const processedIds = new Set<string>();
+    const aggregateMissing = new Set<string>();
+    let savedMessages = 0;
+
+    for (const entry of payload) {
+      if (!entry || typeof entry !== 'object') {
+        continue;
+      }
+
+      const role = typeof entry.role === 'string' ? entry.role.toLowerCase() : null;
+      if (role !== 'user' && role !== 'assistant') {
+        continue;
+      }
+
+      const transcript = typeof entry.transcript === 'string' ? entry.transcript.trim() : '';
+      if (!transcript) {
+        continue;
+      }
+
+      const eventId = typeof entry.eventId === 'string' && entry.eventId.trim() ? entry.eventId.trim() : null;
+      if (eventId) {
+        if (processedIds.has(eventId)) {
+          continue;
+        }
+        processedIds.add(eventId);
+      }
+
+      const audioHint = typeof entry.audioId === 'string' && entry.audioId.trim() ? entry.audioId.trim() : null;
+      const audioUrl = typeof entry.audioUrl === 'string' && entry.audioUrl.trim() ? entry.audioUrl.trim() : null;
+      const prefix = role === 'user' ? '[voice:user]' : '[voice:assistant]';
+      const details: string[] = [prefix];
+      if (audioHint) {
+        details.push(`audio:${audioHint}`);
+      }
+      if (audioUrl) {
+        details.push(`url:${audioUrl}`);
+      }
+      const metadata = details.join(' ');
+      const content = `${metadata}\n${transcript}`;
+
+      if (eventId) {
+        await prisma.message.upsert({
+          where: { id: eventId },
+          update: {},
+          create: {
+            id: eventId,
+            sessionId: id,
+            role,
+            content,
+          },
+        });
+      } else {
+        await prisma.message.create({
+          data: {
+            sessionId: id,
+            role,
+            content,
+          },
+        });
+      }
+
+      savedMessages += 1;
+
+      const structuredOutput = entry.structuredOutput;
+      if (structuredOutput && typeof structuredOutput === 'object') {
+        try {
+          const { missingRequiredSlots } = await applyStructuredOutput(id, structuredOutput);
+          missingRequiredSlots.forEach((slotKey) => aggregateMissing.add(slotKey));
+        } catch (error) {
+          req.log.error({ err: error, sessionId: id }, 'failed to apply structured output for voice turn');
+        }
+      }
+    }
+
+    if (savedMessages === 0) {
+      return reply.code(400).send({ error: 'no valid voice turns provided' });
+    }
+
+    return {
+      saved: savedMessages,
+      missing_required_slots: Array.from(aggregateMissing),
+    };
   });
 }
 
