@@ -26,6 +26,15 @@ type VoiceTurnPayload = {
   structuredOutput?: StructuredOutput | null;
 };
 
+type VoiceTurnPayload = {
+  eventId?: string;
+  role: 'user' | 'assistant';
+  transcript: string;
+  audioUrl?: string | null;
+  audioId?: string | null;
+  structuredOutput?: StructuredOutput | null;
+};
+
 const pageStyle: CSSProperties = {
   margin: '0 auto',
   minHeight: '100vh',
@@ -91,6 +100,154 @@ const audioContainerStyle: CSSProperties = {
   flexDirection: 'column',
   gap: 8,
 };
+
+function normalizeStructuredOutput(value: unknown): StructuredOutput | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const rawSlotUpdates = record.slot_updates ?? record.slotUpdates ?? [];
+  const slotUpdates = Array.isArray(rawSlotUpdates)
+    ? rawSlotUpdates
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') {
+            return null;
+          }
+          const slotRecord = entry as Record<string, unknown>;
+          const slotKey =
+            typeof slotRecord.slotKey === 'string'
+              ? slotRecord.slotKey
+              : typeof slotRecord.slot_key === 'string'
+                ? slotRecord.slot_key
+                : null;
+          if (!slotKey) {
+            return null;
+          }
+
+          return {
+            slotKey,
+            value: slotRecord.value ?? null,
+          };
+        })
+        .filter((entry): entry is { slotKey: string; value: unknown } => Boolean(entry))
+    : [];
+
+  const rawMissing = record.missing_required_slots ?? record.missingRequiredSlots ?? [];
+  const missingRequiredSlots = Array.isArray(rawMissing)
+    ? rawMissing.filter((slot): slot is string => typeof slot === 'string' && slot.length > 0)
+    : [];
+
+  const nextQuestion =
+    typeof record.next_question === 'string'
+      ? record.next_question
+      : typeof record.nextQuestion === 'string'
+        ? record.nextQuestion
+        : null;
+
+  if (slotUpdates.length === 0 && missingRequiredSlots.length === 0 && !nextQuestion) {
+    return null;
+  }
+
+  return {
+    slot_updates: slotUpdates,
+    missing_required_slots: missingRequiredSlots,
+    next_question: nextQuestion,
+  } satisfies StructuredOutput;
+}
+
+function extractContentDetails(content: unknown): {
+  transcript: string | null;
+  audioUrl: string | null;
+  audioId: string | null;
+  structuredOutput: StructuredOutput | null;
+} {
+  const transcriptSegments: string[] = [];
+  let audioUrl: string | null = null;
+  let audioId: string | null = null;
+  let structuredOutput: StructuredOutput | null = null;
+
+  const visit = (value: unknown) => {
+    if (value === null || value === undefined) {
+      return;
+    }
+    if (typeof value === 'string') {
+      if (value.trim()) {
+        transcriptSegments.push(value.trim());
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value !== 'object') {
+      return;
+    }
+
+    const record = value as Record<string, unknown>;
+    const maybeText = record.text ?? record.message ?? record.value ?? record.output;
+    if (typeof maybeText === 'string' && maybeText.trim()) {
+      transcriptSegments.push(maybeText.trim());
+    }
+    if (typeof record.transcript === 'string' && record.transcript.trim()) {
+      transcriptSegments.push(record.transcript.trim());
+    }
+    if (Array.isArray(record.transcripts)) {
+      record.transcripts.forEach(visit);
+    }
+
+    if (!audioUrl) {
+      const candidate =
+        typeof record.audio_url === 'string'
+          ? record.audio_url
+          : typeof record.url === 'string'
+            ? record.url
+            : typeof record.href === 'string'
+              ? record.href
+              : null;
+      if (candidate && candidate.trim()) {
+        audioUrl = candidate.trim();
+      }
+    }
+
+    const type = typeof record.type === 'string' ? record.type : null;
+    if (!audioId && typeof record.id === 'string' && record.id.trim() && type && type.includes('audio')) {
+      audioId = record.id.trim();
+    }
+
+    if (!structuredOutput && type === 'structured_output') {
+      structuredOutput = normalizeStructuredOutput(record.output ?? record.data ?? record.value ?? null);
+    }
+    if (!structuredOutput && record.structured_output) {
+      structuredOutput = normalizeStructuredOutput(record.structured_output);
+    }
+    if (!structuredOutput && record.output && typeof record.output === 'object') {
+      structuredOutput = normalizeStructuredOutput(record.output);
+    }
+
+    if (record.content) {
+      visit(record.content);
+    }
+    if (record.parts) {
+      visit(record.parts);
+    }
+    if (record.delta) {
+      visit(record.delta);
+    }
+  };
+
+  visit(content);
+
+  const transcript = transcriptSegments.join('\n').trim();
+
+  return {
+    transcript: transcript || null,
+    audioUrl,
+    audioId,
+    structuredOutput,
+  };
+}
 
 function normalizeStructuredOutput(value: unknown): StructuredOutput | null {
   if (!value || typeof value !== 'object') {
