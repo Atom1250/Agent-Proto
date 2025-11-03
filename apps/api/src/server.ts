@@ -1,6 +1,8 @@
 import Fastify from 'fastify';
 type HealthResponse = { status: 'ok' };
 import { sessionsRoutes } from './routes/v1/sessions';
+import { adminRoutes } from './routes/v1/admin';
+import { realtimeRoutes } from './routes/v1/realtime';
 
 const port = Number(process.env.API_PORT ?? 3001);
 const host = process.env.API_HOST ?? '0.0.0.0';
@@ -17,7 +19,7 @@ async function buildServer() {
         }
   });
 
-  app.get('/health', async (_req, _res): Promise<HealthResponse> => {
+  app.get('/health', async (): Promise<HealthResponse> => {
     return { status: 'ok' };
   });
 
@@ -29,6 +31,8 @@ async function buildServer() {
 
   app.register(async (v1) => {
     await sessionsRoutes(v1);
+    await adminRoutes(v1);
+    await realtimeRoutes(v1);
   }, { prefix: '/v1' });
 
   return app;
