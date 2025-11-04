@@ -11,7 +11,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "prisma db seed"
+    "prisma:seed": "prisma db seed",
+    "eval:orchestrator": "tsx eval/orchestrator/run.ts"
   },
   "dependencies": {
     "fastify": "^4.26.2",
