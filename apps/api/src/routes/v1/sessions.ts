@@ -1,6 +1,4 @@
 import { FastifyInstance } from 'fastify';
-import { Buffer } from 'node:buffer';
-
 import type { StructuredOutput } from '@agent-proto/shared';
 
 import { getAttachmentService } from '../../lib/attachments';
@@ -183,24 +181,20 @@ export async function sessionsRoutes(app: FastifyInstance) {
   app.put<{ Params: { token: string } }>('/attachments/upload/:token', async (req, reply) => {
     const { token } = req.params;
 
-    const buffers: Buffer[] = [];
     try {
-      await new Promise<void>((resolve, reject) => {
-        req.raw.on('data', (chunk) => {
-          buffers.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        });
-        req.raw.on('end', () => resolve());
-        req.raw.on('error', (error) => reject(error));
+      const lengthHeader = req.headers['content-length'];
+      const parsedLength = Array.isArray(lengthHeader)
+        ? Number(lengthHeader[0])
+        : typeof lengthHeader === 'string'
+        ? Number(lengthHeader)
+        : null;
+
+      const contentLength = parsedLength != null && Number.isFinite(parsedLength) ? parsedLength : null;
+
+      await attachmentService.receiveUpload(token, req.raw, {
+        contentType: req.headers['content-type'],
+        contentLength,
       });
-    } catch (error) {
-      req.log.error({ err: error }, 'failed to read upload payload');
-      return reply.code(400).send({ error: 'invalid upload payload' });
-    }
-
-    const payload = Buffer.concat(buffers);
-
-    try {
-      await attachmentService.receiveUpload(token, payload, req.headers['content-type']);
       return reply.code(204).send();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'upload failed';
@@ -210,6 +204,12 @@ export async function sessionsRoutes(app: FastifyInstance) {
       }
       if (message === 'attachment-not-found') {
         return reply.code(404).send({ error: 'attachment missing' });
+      }
+      if (message === 'invalid-content-length') {
+        return reply.code(400).send({ error: 'invalid content length' });
+      }
+      if (message === 'attachment-too-large' || message === 'attachment-size-exceeded') {
+        return reply.code(413).send({ error: 'attachment too large' });
       }
       return reply.code(500).send({ error: 'unable to store attachment' });
     }
@@ -325,6 +325,123 @@ export async function sessionsRoutes(app: FastifyInstance) {
     if (savedMessages === 0) {
       return reply.code(400).send({ error: 'no valid voice turns provided' });
     }
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body:
+      | {
+          eventId?: string;
+          role?: string;
+          transcript?: string;
+          audioUrl?: string | null;
+          audioId?: string | null;
+          structuredOutput?: StructuredOutput | null;
+        }
+      | Array<{
+          eventId?: string;
+          role?: string;
+          transcript?: string;
+          audioUrl?: string | null;
+          audioId?: string | null;
+          structuredOutput?: StructuredOutput | null;
+        }>;
+  }>('/sessions/:id/voice-turns', async (req, reply) => {
+    const startedAt = process.hrtime.bigint();
+    const { id } = req.params;
+
+    const session = await prisma.session.findUnique({ where: { id } });
+    if (!session) {
+      return reply.code(404).send({ error: 'session not found' });
+    }
+
+    const payload = Array.isArray(req.body) ? req.body : req.body ? [req.body] : [];
+    if (payload.length === 0) {
+      return reply.code(400).send({ error: 'voice turn payload missing' });
+    }
+
+    const processedIds = new Set<string>();
+    const aggregateMissing = new Set<string>();
+    let savedMessages = 0;
+
+    for (const entry of payload) {
+      if (!entry || typeof entry !== 'object') {
+        continue;
+      }
+
+      const role = typeof entry.role === 'string' ? entry.role.toLowerCase() : null;
+      if (role !== 'user' && role !== 'assistant') {
+        continue;
+      }
+
+      const transcript = typeof entry.transcript === 'string' ? entry.transcript.trim() : '';
+      if (!transcript) {
+        continue;
+      }
+
+      const eventId = typeof entry.eventId === 'string' && entry.eventId.trim() ? entry.eventId.trim() : null;
+      if (eventId) {
+        if (processedIds.has(eventId)) {
+          continue;
+        }
+        processedIds.add(eventId);
+      }
+
+      const audioHint = typeof entry.audioId === 'string' && entry.audioId.trim() ? entry.audioId.trim() : null;
+      const audioUrl = typeof entry.audioUrl === 'string' && entry.audioUrl.trim() ? entry.audioUrl.trim() : null;
+      const prefix = role === 'user' ? '[voice:user]' : '[voice:assistant]';
+      const details: string[] = [prefix];
+      if (audioHint) {
+        details.push(`audio:${audioHint}`);
+      }
+      if (audioUrl) {
+        details.push(`url:${audioUrl}`);
+      }
+      const metadata = details.join(' ');
+      const content = `${metadata}\n${transcript}`;
+
+      if (eventId) {
+        await prisma.message.upsert({
+          where: { id: eventId },
+          update: {},
+          create: {
+            id: eventId,
+            sessionId: id,
+            role,
+            content,
+          },
+        });
+      } else {
+        await prisma.message.create({
+          data: {
+            sessionId: id,
+            role,
+            content,
+          },
+        });
+      }
+
+      savedMessages += 1;
+
+      const structuredOutput = entry.structuredOutput;
+      if (structuredOutput && typeof structuredOutput === 'object') {
+        try {
+          const { missingRequiredSlots } = await applyStructuredOutput(id, structuredOutput);
+          missingRequiredSlots.forEach((slotKey) => aggregateMissing.add(slotKey));
+        } catch (error) {
+          req.log.error({ err: error, sessionId: id }, 'failed to apply structured output for voice turn');
+        }
+      }
+    }
+
+    if (savedMessages === 0) {
+      return reply.code(400).send({ error: 'no valid voice turns provided' });
+    }
+
+    const result = {
+      saved: savedMessages,
+      missing_required_slots: Array.from(aggregateMissing),
+    };
 
     const result = {
       saved: savedMessages,

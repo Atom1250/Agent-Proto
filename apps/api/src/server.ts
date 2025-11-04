@@ -45,8 +45,31 @@ async function buildServer() {
         redact: { paths: redactPaths, censor: '[Redacted]' },
       };
 
+  const trustProxy = (() => {
+    const raw = process.env.TRUST_PROXY;
+    if (!raw) {
+      return true;
+    }
+
+    const normalized = raw.trim().toLowerCase();
+    if (['false', '0', 'no'].includes(normalized)) {
+      return false;
+    }
+    if (['true', '1', 'yes'].includes(normalized)) {
+      return true;
+    }
+
+    const numeric = Number(raw);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+
+    return raw;
+  })();
+
   const app = Fastify({
     logger,
+    trustProxy,
     genReqId(request) {
       const header = request.headers['x-request-id'];
       const incoming = Array.isArray(header) ? header[0] : header;
@@ -130,7 +153,15 @@ async function buildServer() {
     }
 
     const now = Date.now();
-    const key = req.ip ?? req.socket.remoteAddress ?? 'anonymous';
+    const forwarded = req.headers['x-forwarded-for'];
+    let forwardedIp: string | null = null;
+    if (Array.isArray(forwarded)) {
+      forwardedIp = forwarded[0] ?? null;
+    } else if (typeof forwarded === 'string') {
+      forwardedIp = forwarded;
+    }
+
+    const key = forwardedIp?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress || 'anonymous';
     const existing = rateBuckets.get(key);
 
     if (!existing || existing.resetAt <= now) {
