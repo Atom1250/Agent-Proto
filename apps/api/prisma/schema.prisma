@@ -103,7 +103,11 @@ model attachment {
   message    message? @relation(fields: [messageId], references: [id])
   messageId  String?
   url        String
+  storageKey String
+  filename   String?
   mimeType   String?
+  size       Int?
+  checksum   String?
   createdAt  DateTime @default(now())
 }
 
