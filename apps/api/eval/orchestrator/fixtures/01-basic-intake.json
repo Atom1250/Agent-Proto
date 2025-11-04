@@ -1,0 +1,19 @@
+{
+  "id": "basic-intake",
+  "description": "Captures client name and email from a simple introduction.",
+  "utterance": "Hi there, I'm Jamie Rivera and you can reach me at jamie@example.com.",
+  "goldenStructuredOutput": {
+    "slot_updates": [
+      { "slot_key": "client_name", "value": "Jamie Rivera" },
+      { "slot_key": "contact_email", "value": "jamie@example.com" }
+    ],
+    "missing_required_slots": []
+  },
+  "expected": {
+    "slotUpdates": [
+      { "slotKey": "client_name", "value": "Jamie Rivera" },
+      { "slotKey": "contact_email", "value": "jamie@example.com" }
+    ],
+    "missingRequiredSlots": []
+  }
+}
