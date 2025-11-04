@@ -35,7 +35,7 @@ database before using the "Start session" flow:
    `individual_kyc_v1`):
 
    ```bash
-   pnpm --filter @agent-proto/api prisma db seed
+   pnpm --filter @agent-proto/api run prisma:seed
    ```
 
 2. Create at least one client record (via Prisma Studio, `psql`, or your
