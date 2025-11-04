@@ -308,7 +308,14 @@ export default function SessionPage({ params }: PageProps) {
           <span style={{ fontWeight: 600 }}>Required slot completion</span>
           <span>{percentFilled}%</span>
         </div>
-        <div style={{ height: 12, backgroundColor: '#e5e7eb', borderRadius: 9999, overflow: 'hidden' }}>
+        <div
+          style={{ height: 12, backgroundColor: '#e5e7eb', borderRadius: 9999, overflow: 'hidden' }}
+          role="progressbar"
+          aria-valuenow={percentFilled}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Required slot completion"
+        >
           <div
             style={{
               width: `${percentFilled}%`,
@@ -321,6 +328,110 @@ export default function SessionPage({ params }: PageProps) {
       </div>
     );
   }, [percentFilled]);
+
+  const missingSlotsPanel = useMemo(() => {
+    if (!hasMissingSlotsData) {
+      return (
+        <div
+          style={{
+            borderRadius: 12,
+            border: '1px dashed #d1d5db',
+            backgroundColor: '#f9fafb',
+            padding: 12,
+            fontSize: 14,
+            color: '#6b7280',
+          }}
+          aria-live="polite"
+        >
+          Missing slot information will appear after the assistant replies.
+        </div>
+      );
+    }
+
+    if (missingSlots.length === 0) {
+      return (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            borderRadius: 12,
+            border: '1px solid #bbf7d0',
+            backgroundColor: '#f0fdf4',
+            color: '#047857',
+            padding: 12,
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+          aria-live="polite"
+        >
+          <span role="img" aria-label="Complete">
+            ✅
+          </span>
+          All required slots have been collected.
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }} aria-live="polite">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+            borderRadius: 12,
+            border: '1px solid #fcd34d',
+            backgroundColor: '#fef3c7',
+            color: '#92400e',
+            padding: 12,
+            fontSize: 14,
+            lineHeight: 1.5,
+          }}
+        >
+          <span role="img" aria-label="Attention">
+            ⚠️
+          </span>
+          <div>
+            <strong>{missingSlots.length}</strong> required field{missingSlots.length === 1 ? '' : 's'} still need attention.
+            Collect the remaining details below.
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {missingSlots.map((slot) => (
+            <span
+              key={slot}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 10px',
+                borderRadius: 9999,
+                backgroundColor: '#fee2e2',
+                border: '1px solid #fecaca',
+                color: '#b91c1c',
+                fontSize: 13,
+                fontWeight: 600,
+                letterSpacing: 0.2,
+                textTransform: 'capitalize',
+              }}
+            >
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  backgroundColor: '#ef4444',
+                }}
+              />
+              {slot.replace(/[_-]/g, ' ')}
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }, [hasMissingSlotsData, missingSlots]);
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -474,23 +585,7 @@ export default function SessionPage({ params }: PageProps) {
           {progressBar}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <h2 style={{ fontSize: 16, fontWeight: 600 }}>Missing required slots</h2>
-            {hasMissingSlotsData ? (
-              missingSlots.length === 0 ? (
-                <p style={{ fontSize: 14, color: '#6b7280' }}>All required slots have been collected.</p>
-              ) : (
-                <ul style={{ listStyle: 'disc', paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {missingSlots.map((slot) => (
-                    <li key={slot} style={{ fontSize: 14, color: '#111827' }}>
-                      {slot}
-                    </li>
-                  ))}
-                </ul>
-              )
-            ) : (
-              <p style={{ fontSize: 14, color: '#6b7280' }}>
-                Missing slot information will appear after the assistant replies.
-              </p>
-            )}
+            {missingSlotsPanel}
           </div>
         </aside>
       </section>

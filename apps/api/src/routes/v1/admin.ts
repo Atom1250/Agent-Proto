@@ -13,6 +13,7 @@ type SessionsQuery = {
   status?: string;
   startedAfter?: string;
   startedBefore?: string;
+  search?: string;
 };
 
 type AdminResponseValue = {
@@ -75,9 +76,38 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Querystring: SessionsQuery }>('/sessions', async (req) => {
-    const { templateId, status, startedAfter, startedBefore } = req.query ?? {};
+    const { templateId, status, startedAfter, startedBefore, search } = req.query ?? {};
 
     const where: Parameters<typeof prisma.session.findMany>[0]['where'] = {};
+
+    const templatesPromise = prisma.onboarding_template.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+
+    if (search && search.trim()) {
+      const trimmed = search.trim();
+      const matchingSessions = await prisma.$queryRaw<Array<{ sessionId: string }>>`
+        SELECT DISTINCT "sessionId" AS "sessionId"
+        FROM "message"
+        WHERE to_tsvector('english', "content") @@ websearch_to_tsquery('english', ${trimmed})
+      `;
+
+      const searchSessionIds = matchingSessions.map((row) => row.sessionId);
+
+      if (searchSessionIds.length === 0) {
+        const templates = await templatesPromise;
+        return {
+          sessions: [],
+          filters: {
+            templates,
+            statuses: [],
+          },
+        };
+      }
+
+      where.id = { in: searchSessionIds };
+    }
 
     if (templateId) {
       where.templateId = templateId;
@@ -122,10 +152,7 @@ export async function adminRoutes(app: FastifyInstance) {
           responses: { select: { slotKey: true } },
         },
       }),
-      prisma.onboarding_template.findMany({
-        select: { id: true, name: true },
-        orderBy: { name: 'asc' },
-      }),
+      templatesPromise,
     ]);
 
     const summaries = sessions.map((session) => {
@@ -309,8 +336,9 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get<{ Querystring: { sessionId?: string } }>('/export', async (req, reply) => {
+  app.get<{ Querystring: { sessionId?: string; format?: string } }>('/export', async (req, reply) => {
     const sessionId = req.query.sessionId;
+    const format = (req.query.format ?? 'json').toLowerCase();
 
     if (!sessionId) {
       reply.code(400).send({ error: 'sessionId is required' });
@@ -337,22 +365,59 @@ export async function adminRoutes(app: FastifyInstance) {
 
     const slotLabelMap = new Map(session.template?.slots.map((slot) => [slot.key, slot.label ?? slot.key] as const) ?? []);
 
+    const normalizedResponses = session.responses.map((response) => {
+      const parsed = parseResponseValue(response.value ?? null);
+      return {
+        slotKey: response.slotKey,
+        slotLabel: slotLabelMap.get(response.slotKey) ?? response.slotKey,
+        value: parsed.text,
+        confidence: parsed.confidence,
+        raw: parsed.raw,
+        capturedAt: response.createdAt.toISOString(),
+      };
+    });
+
     const exportPayload = {
       sessionId: session.id,
       templateName: session.template?.name ?? null,
       exportedAt: new Date().toISOString(),
-      responses: session.responses.map((response) => {
-        const parsed = parseResponseValue(response.value ?? null);
-        return {
-          slotKey: response.slotKey,
-          slotLabel: slotLabelMap.get(response.slotKey) ?? response.slotKey,
-          value: parsed.text,
-          confidence: parsed.confidence,
-          raw: parsed.raw,
-          capturedAt: response.createdAt.toISOString(),
-        };
-      }),
+      responses: normalizedResponses,
     };
+
+    if (format === 'csv') {
+      const escapeCsv = (value: unknown) => {
+        if (value === null || value === undefined) {
+          return '';
+        }
+        const text = String(value);
+        if (text === '') {
+          return '';
+        }
+        const needsQuotes = /[",\n]/.test(text);
+        const escaped = text.replace(/"/g, '""');
+        return needsQuotes ? `"${escaped}"` : escaped;
+      };
+
+      const header = ['slot_key', 'slot_label', 'value', 'confidence', 'captured_at', 'raw_json'];
+      const rows = normalizedResponses.map((response) => {
+        const confidence = response.confidence === null || response.confidence === undefined ? '' : response.confidence;
+        const rawJson = response.raw === undefined ? '' : JSON.stringify(response.raw);
+        return [
+          escapeCsv(response.slotKey),
+          escapeCsv(response.slotLabel),
+          escapeCsv(response.value),
+          escapeCsv(confidence),
+          escapeCsv(response.capturedAt),
+          escapeCsv(rawJson),
+        ].join(',');
+      });
+
+      const csv = [header.join(','), ...rows].join('\n');
+
+      reply.header('Content-Type', 'text/csv');
+      reply.header('Content-Disposition', `attachment; filename="session-${session.id}-responses.csv"`);
+      return csv;
+    }
 
     reply.header('Content-Type', 'application/json');
     reply.header('Content-Disposition', `attachment; filename="session-${session.id}-responses.json"`);

@@ -61,6 +61,7 @@ type Filters = {
   status: string;
   startedAfter: string;
   startedBefore: string;
+  search: string;
 };
 
 function formatDate(value: string | null | undefined) {
@@ -107,7 +108,13 @@ export default function AdminPage() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [filters, setFilters] = useState<Filters>({ templateId: '', status: '', startedAfter: '', startedBefore: '' });
+  const [filters, setFilters] = useState<Filters>({
+    templateId: '',
+    status: '',
+    startedAfter: '',
+    startedBefore: '',
+    search: '',
+  });
 
   const selectedSession = useMemo(() => {
     if (!selectedSessionId || !sessionsPayload) {
@@ -138,6 +145,9 @@ export default function AdminPage() {
         }
         if (activeFilters.startedBefore) {
           params.set('startedBefore', activeFilters.startedBefore);
+        }
+        if (activeFilters.search.trim()) {
+          params.set('search', activeFilters.search.trim());
         }
 
         const url = apiUrl(`/v1/admin/sessions${params.toString() ? `?${params.toString()}` : ''}`);
@@ -241,20 +251,22 @@ export default function AdminPage() {
     [],
   );
 
-  const exportResponses = useCallback(async () => {
-    if (!selectedSessionId || !password) {
-      return;
-    }
+  const exportResponses = useCallback(
+    async (format: 'json' | 'csv') => {
+      if (!selectedSessionId || !password) {
+        return;
+      }
 
-    try {
-      const response = await fetch(apiUrl(`/v1/admin/export?sessionId=${encodeURIComponent(selectedSessionId)}`), {
-        headers: { 'x-admin-secret': password },
-      });
+      try {
+        const params = new URLSearchParams({ sessionId: selectedSessionId, format });
+        const response = await fetch(apiUrl(`/v1/admin/export?${params.toString()}`), {
+          headers: { 'x-admin-secret': password },
+        });
 
-      if (response.status === 401) {
-        setAuthError('Session expired, please re-enter the admin password.');
-        setIsUnlocked(false);
-        setSessionsPayload(null);
+        if (response.status === 401) {
+          setAuthError('Session expired, please re-enter the admin password.');
+          setIsUnlocked(false);
+          setSessionsPayload(null);
         return;
       }
 
@@ -262,20 +274,22 @@ export default function AdminPage() {
         throw new Error(`Export failed (${response.status})`);
       }
 
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `session-${selectedSessionId}-responses.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error(error);
-      setDetailError(error instanceof Error ? error.message : 'Unable to export responses.');
-    }
-  }, [password, selectedSessionId]);
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `session-${selectedSessionId}-responses.${format}`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        console.error(error);
+        setDetailError(error instanceof Error ? error.message : 'Unable to export responses.');
+      }
+    },
+    [password, selectedSessionId],
+  );
 
   const downloadAttachment = useCallback(
     async (attachment: { id: string; filename: string | null; downloadUrl: string | null }) => {
@@ -413,7 +427,7 @@ export default function AdminPage() {
               {isLoading ? <span style={{ fontSize: 12, color: '#6b7280' }}>Loading…</span> : null}
             </div>
 
-            <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+            <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <span style={{ fontSize: 13, color: '#4b5563' }}>Template</span>
                 <select
@@ -462,6 +476,17 @@ export default function AdminPage() {
                   type="date"
                   value={filters.startedBefore}
                   onChange={onFilterChange('startedBefore')}
+                  style={{ borderRadius: 8, border: '1px solid #d1d5db', padding: '8px 10px' }}
+                />
+              </label>
+
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 13, color: '#4b5563' }}>Search transcript</span>
+                <input
+                  type="search"
+                  placeholder="Find message text"
+                  value={filters.search}
+                  onChange={onFilterChange('search')}
                   style={{ borderRadius: 8, border: '1px solid #d1d5db', padding: '8px 10px' }}
                 />
               </label>
@@ -529,7 +554,7 @@ export default function AdminPage() {
           >
             {selectedSession && sessionDetail ? (
               <>
-                <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
                     <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>{selectedSession.clientName}</h2>
                     <span style={{ color: '#4b5563', fontSize: 14 }}>
@@ -539,21 +564,39 @@ export default function AdminPage() {
                       {sessionDetail.session.percentComplete}% complete
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={exportResponses}
-                    style={{
-                      borderRadius: 8,
-                      border: '1px solid #1d4ed8',
-                      backgroundColor: '#1d4ed8',
-                      color: '#ffffff',
-                      padding: '8px 14px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Export JSON
-                  </button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      type="button"
+                      onClick={() => exportResponses('json')}
+                      style={{
+                        borderRadius: 8,
+                        border: '1px solid #1d4ed8',
+                        backgroundColor: '#1d4ed8',
+                        color: '#ffffff',
+                        padding: '8px 14px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Export JSON
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => exportResponses('csv')}
+                      style={{
+                        borderRadius: 8,
+                        border: '1px solid #0f172a',
+                        backgroundColor: '#ffffff',
+                        color: '#0f172a',
+                        padding: '8px 14px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06)',
+                      }}
+                    >
+                      Export CSV
+                    </button>
+                  </div>
                 </header>
 
                 <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)' }}>

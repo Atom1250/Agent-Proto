@@ -1,0 +1,22 @@
+{
+  "id": "invalid-noise",
+  "description": "Structured output includes noise and nulls that should be filtered.",
+  "utterance": "I might move in around October 12th, maybe sooner, not sure about the unit size.",
+  "goldenStructuredOutput": {
+    "slot_updates": [
+      null,
+      { "slot_key": "move_in_date", "value": "2024-10-12" },
+      { "slotKey": null, "value": "ignored" },
+      { "slot_key": "preferred_unit_size", "value": null }
+    ],
+    "missing_required_slots": ["household_size", 42, "income_range"],
+    "notes": "extra field should be ignored"
+  },
+  "expected": {
+    "slotUpdates": [
+      { "slotKey": "move_in_date", "value": "2024-10-12" },
+      { "slotKey": "preferred_unit_size", "value": null }
+    ],
+    "missingRequiredSlots": ["household_size", "income_range"]
+  }
+}

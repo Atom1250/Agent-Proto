@@ -1,12 +1,25 @@
 import type { StructuredOutput, SlotUpdate } from '@agent-proto/shared';
 
-import { recordSlotUpdates } from './metrics';
-import { prisma } from './prisma';
+import type { PrismaClient } from '@prisma/client';
 
-export type AppliedStructuredOutput = {
+import { recordSlotUpdates } from './metrics';
+
+let prismaClient: PrismaClient | null = null;
+
+async function getPrisma(): Promise<PrismaClient> {
+  if (!prismaClient) {
+    const module = await import('./prisma.js');
+    prismaClient = module.prisma;
+  }
+  return prismaClient;
+}
+
+export type NormalizedStructuredOutput = {
   slotUpdates: SlotUpdate[];
   missingRequiredSlots: string[];
 };
+
+export type AppliedStructuredOutput = NormalizedStructuredOutput;
 
 function sanitizeSlotUpdates(slotUpdates: unknown): SlotUpdate[] {
   if (!Array.isArray(slotUpdates)) {
@@ -42,21 +55,35 @@ function sanitizeMissingSlots(value: unknown): string[] {
     .filter((entry): entry is string => Boolean(entry));
 }
 
+export function normalizeStructuredOutput(
+  structuredOutput: StructuredOutput | Record<string, unknown> | null | undefined,
+): NormalizedStructuredOutput {
+  if (!structuredOutput || typeof structuredOutput !== 'object') {
+    return { slotUpdates: [], missingRequiredSlots: [] };
+  }
+
+  const payload = structuredOutput as Record<string, unknown>;
+  const slotUpdates = sanitizeSlotUpdates(payload.slot_updates ?? payload.slotUpdates);
+  const missingRequiredSlots = sanitizeMissingSlots(
+    payload.missing_required_slots ?? payload.missingRequiredSlots,
+  );
+
+  return { slotUpdates, missingRequiredSlots };
+}
+
 export async function applyStructuredOutput(
   sessionId: string,
   structuredOutput: StructuredOutput | null | undefined,
 ): Promise<AppliedStructuredOutput> {
-  if (!structuredOutput) {
-    return { slotUpdates: [], missingRequiredSlots: [] };
-  }
+  const { slotUpdates, missingRequiredSlots } = normalizeStructuredOutput(structuredOutput);
 
-  const slotUpdates = sanitizeSlotUpdates(structuredOutput.slot_updates ?? structuredOutput.slotUpdates);
-  const missingRequiredSlots = sanitizeMissingSlots(
-    structuredOutput.missing_required_slots ?? structuredOutput.missingRequiredSlots,
-  );
+  if (slotUpdates.length === 0) {
+    return { slotUpdates, missingRequiredSlots };
+  }
 
   const startedAt = process.hrtime.bigint();
 
+  const prisma = await getPrisma();
   await Promise.all(
     slotUpdates.map((update) =>
       prisma.response.upsert({
@@ -73,13 +100,8 @@ export async function applyStructuredOutput(
     ),
   );
 
-  if (slotUpdates.length > 0) {
-    const elapsedSeconds = Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
-    recordSlotUpdates(slotUpdates.length, elapsedSeconds);
-  }
+  const elapsedSeconds = Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
+  recordSlotUpdates(slotUpdates.length, elapsedSeconds);
 
-  return {
-    slotUpdates,
-    missingRequiredSlots,
-  };
+  return { slotUpdates, missingRequiredSlots };
 }
