@@ -76,13 +76,19 @@ class HistogramHandle {
 
     const { buckets, bucketCounts } = this.metric;
     for (let index = 0; index < buckets.length; index += 1) {
-      if (sample <= buckets[index]) {
-        bucketCounts[index] += 1;
+      const bound = buckets[index];
+      if (bound === undefined) {
+        continue;
+      }
+      if (sample <= bound) {
+        const current = bucketCounts[index] ?? 0;
+        bucketCounts[index] = current + 1;
       }
     }
 
     const infIndex = bucketCounts.length - 1;
-    bucketCounts[infIndex] += 1;
+    const currentInf = bucketCounts[infIndex] ?? 0;
+    bucketCounts[infIndex] = currentInf + 1;
     this.metric.count += 1;
     this.metric.sum += sample;
   }
@@ -174,12 +180,12 @@ function renderHistogram(metric: HistogramMetric): string {
   ];
 
   for (let index = 0; index < metric.buckets.length; index += 1) {
-    const bound = metric.buckets[index];
-    const value = metric.bucketCounts[index];
+    const bound = metric.buckets[index] ?? 0;
+    const value = metric.bucketCounts[index] ?? 0;
     lines.push(`${metric.name}_bucket{le="${formatValue(bound)}"} ${formatValue(value)}`);
   }
 
-  const infCount = metric.bucketCounts[metric.bucketCounts.length - 1];
+  const infCount = metric.bucketCounts[metric.bucketCounts.length - 1] ?? 0;
   lines.push(`${metric.name}_bucket{le="+Inf"} ${formatValue(infCount)}`);
   lines.push(`${metric.name}_sum ${formatValue(metric.sum)}`);
   lines.push(`${metric.name}_count ${formatValue(metric.count)}`);

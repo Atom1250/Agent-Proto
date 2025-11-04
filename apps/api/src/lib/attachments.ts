@@ -189,7 +189,7 @@ export class AttachmentService {
     }
 
     await new Promise<void>((resolve, reject) => {
-      fileStream.end((endError) => {
+      fileStream.end((endError?: NodeJS.ErrnoException | null) => {
         if (endError) {
           reject(endError);
         } else {

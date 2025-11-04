@@ -26,23 +26,22 @@ function sanitizeSlotUpdates(slotUpdates: unknown): SlotUpdate[] {
     return [];
   }
 
-  return slotUpdates
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object') {
-        return null;
-      }
-      const record = entry as Record<string, unknown>;
-      const slotKey = typeof record.slotKey === 'string' ? record.slotKey : typeof record.slot_key === 'string' ? record.slot_key : null;
-      if (!slotKey) {
-        return null;
-      }
+  const normalized: SlotUpdate[] = [];
+  for (const entry of slotUpdates) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const slotKey = typeof record.slotKey === 'string' ? record.slotKey : typeof record.slot_key === 'string' ? record.slot_key : null;
+    if (!slotKey) {
+      continue;
+    }
 
-      return {
-        slotKey,
-        value: record.value ?? null,
-      } satisfies SlotUpdate;
-    })
-    .filter((entry): entry is SlotUpdate => Boolean(entry));
+    const value = Object.prototype.hasOwnProperty.call(record, 'value') ? record.value : null;
+    normalized.push({ slotKey, value });
+  }
+
+  return normalized;
 }
 
 function sanitizeMissingSlots(value: unknown): string[] {

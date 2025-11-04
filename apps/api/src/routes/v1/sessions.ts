@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import type { StructuredOutput } from '@agent-proto/shared';
 
 import { getAttachmentService } from '../../lib/attachments';
@@ -22,13 +22,31 @@ async function computeRequiredSlotProgress(sessionId: string, templateId: string
     prisma.response.findMany({ where: { sessionId }, select: { slotKey: true } }),
   ]);
 
-  const requiredKeys = requiredSlots.map((slot) => slot.key);
-  const respondedKeys = new Set(responses.map((response) => response.slotKey));
+  const requiredKeys: string[] = [];
+  for (const slot of requiredSlots) {
+    requiredKeys.push(slot.key);
+  }
 
-  const filledCount = requiredKeys.reduce((count, key) => count + (respondedKeys.has(key) ? 1 : 0), 0);
+  const respondedKeys = new Set<string>();
+  for (const response of responses) {
+    respondedKeys.add(response.slotKey);
+  }
+
+  let filledCount = 0;
+  for (const key of requiredKeys) {
+    if (respondedKeys.has(key)) {
+      filledCount += 1;
+    }
+  }
+
   const totalRequired = requiredKeys.length;
   const percentFilled = totalRequired === 0 ? 100 : Math.round((filledCount / totalRequired) * 100);
-  const missingRequiredSlots = requiredKeys.filter((key) => !respondedKeys.has(key));
+  const missingRequiredSlots: string[] = [];
+  for (const key of requiredKeys) {
+    if (!respondedKeys.has(key)) {
+      missingRequiredSlots.push(key);
+    }
+  }
 
   return { percentFilled, missingRequiredSlots };
 }

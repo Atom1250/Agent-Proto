@@ -180,9 +180,6 @@ function extractAssistantMessages(data: unknown): ChatMessage[] {
     }
 
     const finalRole = normalizedRole ?? 'assistant';
-    if (finalRole === 'user') {
-      return;
-    }
 
     messages.push({
       id: id ?? `assistant-${now}-${index}`,

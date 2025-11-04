@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 
-import { FastifyInstance } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 
 import { getAttachmentService } from '../../lib/attachments';
 import { prisma } from '../../lib/prisma';
@@ -78,7 +78,12 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get<{ Querystring: SessionsQuery }>('/sessions', async (req) => {
     const { templateId, status, startedAfter, startedBefore, search } = req.query ?? {};
 
-    const where: Parameters<typeof prisma.session.findMany>[0]['where'] = {};
+    const where: {
+      id?: { in?: string[] };
+      templateId?: string;
+      status?: string;
+      createdAt?: { gte?: Date; lte?: Date };
+    } = {};
 
     const templatesPromise = prisma.onboarding_template.findMany({
       select: { id: true, name: true },
@@ -93,7 +98,7 @@ export async function adminRoutes(app: FastifyInstance) {
         WHERE to_tsvector('english', "content") @@ websearch_to_tsquery('english', ${trimmed})
       `;
 
-      const searchSessionIds = matchingSessions.map((row) => row.sessionId);
+      const searchSessionIds = matchingSessions.map((row: { sessionId: string }) => row.sessionId);
 
       if (searchSessionIds.length === 0) {
         const templates = await templatesPromise;
@@ -155,10 +160,21 @@ export async function adminRoutes(app: FastifyInstance) {
       templatesPromise,
     ]);
 
-    const summaries = sessions.map((session) => {
-      const requiredSlots = session.template?.slots ?? [];
-      const requiredKeys = new Set(requiredSlots.map((slot) => slot.key));
-      const filledCount = session.responses.reduce((acc, response) => acc + (requiredKeys.has(response.slotKey) ? 1 : 0), 0);
+    type SessionSummarySource = (typeof sessions)[number];
+
+    const summaries = sessions.map((session: SessionSummarySource) => {
+      const requiredKeys = new Set<string>();
+      for (const slot of session.template?.slots ?? []) {
+        requiredKeys.add(slot.key);
+      }
+
+      let filledCount = 0;
+      for (const response of session.responses) {
+        if (requiredKeys.has(response.slotKey)) {
+          filledCount += 1;
+        }
+      }
+
       const totalRequired = requiredKeys.size;
       const percentComplete = totalRequired === 0 ? 100 : Math.round((filledCount / totalRequired) * 100);
 
@@ -175,7 +191,11 @@ export async function adminRoutes(app: FastifyInstance) {
       };
     });
 
-    const statuses = Array.from(new Set(summaries.map((s) => s.status))).sort();
+    const statusSet = new Set<string>();
+    for (const summary of summaries) {
+      statusSet.add(summary.status);
+    }
+    const statuses = Array.from(statusSet).sort();
 
     return {
       sessions: summaries,
@@ -245,32 +265,52 @@ export async function adminRoutes(app: FastifyInstance) {
       return;
     }
 
-    const slotLabelMap = new Map(session.template?.slots.map((slot) => [slot.key, slot.label ?? slot.key] as const) ?? []);
+    const slotLabelMap = new Map<string, string>();
+    for (const slot of session.template?.slots ?? []) {
+      slotLabelMap.set(slot.key, slot.label ?? slot.key);
+    }
 
-    const responses = session.responses
-      .map((response) => {
-        const parsed = parseResponseValue(response.value ?? null);
-        return {
-          id: response.id,
-          slotKey: response.slotKey,
-          slotLabel: slotLabelMap.get(response.slotKey) ?? response.slotKey,
-          value: parsed.text,
-          confidence: parsed.confidence,
-          raw: parsed.raw,
-          createdAt: response.createdAt,
-        };
-      })
-      .sort((a, b) => a.slotLabel.localeCompare(b.slotLabel));
+    const responses: Array<{
+      id: string;
+      slotKey: string;
+      slotLabel: string;
+      value: string;
+      confidence: number | null;
+      raw: unknown;
+      createdAt: Date;
+    }> = [];
+    for (const response of session.responses) {
+      const parsed = parseResponseValue(response.value ?? null);
+      responses.push({
+        id: response.id,
+        slotKey: response.slotKey,
+        slotLabel: slotLabelMap.get(response.slotKey) ?? response.slotKey,
+        value: parsed.text,
+        confidence: parsed.confidence,
+        raw: parsed.raw,
+        createdAt: response.createdAt,
+      });
+    }
+    responses.sort((a, b) => a.slotLabel.localeCompare(b.slotLabel));
 
-    const requiredSlots = session.template?.slots ?? [];
-    const requiredKeys = new Set(requiredSlots.map((slot) => slot.key));
-    const filledCount = responses.reduce((acc, response) => acc + (requiredKeys.has(response.slotKey) && response.value ? 1 : 0), 0);
+    const requiredKeys = new Set<string>();
+    for (const slot of session.template?.slots ?? []) {
+      requiredKeys.add(slot.key);
+    }
+
+    let filledCount = 0;
+    for (const response of responses) {
+      if (requiredKeys.has(response.slotKey) && response.value) {
+        filledCount += 1;
+      }
+    }
     const totalRequired = requiredKeys.size;
     const percentComplete = totalRequired === 0 ? 100 : Math.round((filledCount / totalRequired) * 100);
 
     const attachments = await attachmentService.listForSession(id);
+    type AttachmentRecord = Awaited<ReturnType<typeof attachmentService.listForSession>>[number];
     const withAvailability = await Promise.all(
-      attachments.map(async (attachment) => {
+      attachments.map(async (attachment: AttachmentRecord) => {
         let available = false;
         try {
           await attachmentService.openAttachmentPath(attachment.id);
@@ -363,19 +403,30 @@ export async function adminRoutes(app: FastifyInstance) {
       return;
     }
 
-    const slotLabelMap = new Map(session.template?.slots.map((slot) => [slot.key, slot.label ?? slot.key] as const) ?? []);
+    const slotLabelMap = new Map<string, string>();
+    for (const slot of session.template?.slots ?? []) {
+      slotLabelMap.set(slot.key, slot.label ?? slot.key);
+    }
 
-    const normalizedResponses = session.responses.map((response) => {
+    const normalizedResponses: Array<{
+      slotKey: string;
+      slotLabel: string;
+      value: string;
+      confidence: number | null;
+      raw: unknown;
+      capturedAt: string;
+    }> = [];
+    for (const response of session.responses) {
       const parsed = parseResponseValue(response.value ?? null);
-      return {
+      normalizedResponses.push({
         slotKey: response.slotKey,
         slotLabel: slotLabelMap.get(response.slotKey) ?? response.slotKey,
         value: parsed.text,
         confidence: parsed.confidence,
         raw: parsed.raw,
         capturedAt: response.createdAt.toISOString(),
-      };
-    });
+      });
+    }
 
     const exportPayload = {
       sessionId: session.id,
@@ -399,18 +450,19 @@ export async function adminRoutes(app: FastifyInstance) {
       };
 
       const header = ['slot_key', 'slot_label', 'value', 'confidence', 'captured_at', 'raw_json'];
-      const rows = normalizedResponses.map((response) => {
+      const rows: string[] = [];
+      for (const response of normalizedResponses) {
         const confidence = response.confidence === null || response.confidence === undefined ? '' : response.confidence;
         const rawJson = response.raw === undefined ? '' : JSON.stringify(response.raw);
-        return [
+        rows.push([
           escapeCsv(response.slotKey),
           escapeCsv(response.slotLabel),
           escapeCsv(response.value),
           escapeCsv(confidence),
           escapeCsv(response.capturedAt),
           escapeCsv(rawJson),
-        ].join(',');
-      });
+        ].join(','));
+      }
 
       const csv = [header.join(','), ...rows].join('\n');
 

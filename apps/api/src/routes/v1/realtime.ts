@@ -1,9 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 
-type EphemeralTokenResponse = {
+type EphemeralTokenSuccessResponse = {
   token: string;
   expiresAt: string;
   model: string;
+};
+
+type EphemeralTokenErrorResponse = {
+  error: 'service_unavailable' | 'upstream_failure';
 };
 
 type OpenAIRealtimeSessionResponse = {
@@ -17,7 +21,7 @@ const OPENAI_REALTIME_MODEL =
   process.env.OPENAI_REALTIME_MODEL ?? 'gpt-4o-realtime-preview-2024-12-17';
 
 export async function realtimeRoutes(app: FastifyInstance) {
-  app.post<{ Reply: EphemeralTokenResponse }>('/realtime/ephemeral', async (req, reply) => {
+  app.post<{ Reply: EphemeralTokenSuccessResponse | EphemeralTokenErrorResponse }>('/realtime/ephemeral', async (req, reply) => {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       req.log.error('OPENAI_API_KEY is not configured');
@@ -31,9 +35,9 @@ export async function realtimeRoutes(app: FastifyInstance) {
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
-          'OpenAI-Beta': 'realtime=v1'
+          'OpenAI-Beta': 'realtime=v1',
         },
-        body: JSON.stringify({ model: OPENAI_REALTIME_MODEL })
+        body: JSON.stringify({ model: OPENAI_REALTIME_MODEL }),
       });
 
       if (!upstreamResponse.ok) {

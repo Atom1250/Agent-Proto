@@ -99,30 +99,27 @@ function normalizeStructuredOutput(value: unknown): StructuredOutput | null {
 
   const record = value as Record<string, unknown>;
   const rawSlotUpdates = record.slot_updates ?? record.slotUpdates ?? [];
-  const slotUpdates = Array.isArray(rawSlotUpdates)
-    ? rawSlotUpdates
-        .map((entry) => {
-          if (!entry || typeof entry !== 'object') {
-            return null;
-          }
-          const slotRecord = entry as Record<string, unknown>;
-          const slotKey =
-            typeof slotRecord.slotKey === 'string'
-              ? slotRecord.slotKey
-              : typeof slotRecord.slot_key === 'string'
-                ? slotRecord.slot_key
-                : null;
-          if (!slotKey) {
-            return null;
-          }
+  const slotUpdates: Array<{ slotKey: string; value: unknown }> = [];
 
-          return {
-            slotKey,
-            value: slotRecord.value ?? null,
-          };
-        })
-        .filter((entry): entry is { slotKey: string; value: unknown } => Boolean(entry))
-    : [];
+  if (Array.isArray(rawSlotUpdates)) {
+    for (const entry of rawSlotUpdates) {
+      if (!entry || typeof entry !== 'object') {
+        continue;
+      }
+      const slotRecord = entry as Record<string, unknown>;
+      const slotKey =
+        typeof slotRecord.slotKey === 'string'
+          ? slotRecord.slotKey
+          : typeof slotRecord.slot_key === 'string'
+            ? slotRecord.slot_key
+            : null;
+      if (!slotKey) {
+        continue;
+      }
+      const value = Object.prototype.hasOwnProperty.call(slotRecord, 'value') ? slotRecord.value : null;
+      slotUpdates.push({ slotKey, value });
+    }
+  }
 
   const rawMissing = record.missing_required_slots ?? record.missingRequiredSlots ?? [];
   const missingRequiredSlots = Array.isArray(rawMissing)
