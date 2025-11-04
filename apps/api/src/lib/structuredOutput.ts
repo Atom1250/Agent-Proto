@@ -1,5 +1,6 @@
 import type { StructuredOutput, SlotUpdate } from '@agent-proto/shared';
 
+import { recordSlotUpdates } from './metrics';
 import { prisma } from './prisma';
 
 export type AppliedStructuredOutput = {
@@ -54,6 +55,8 @@ export async function applyStructuredOutput(
     structuredOutput.missing_required_slots ?? structuredOutput.missingRequiredSlots,
   );
 
+  const startedAt = process.hrtime.bigint();
+
   await Promise.all(
     slotUpdates.map((update) =>
       prisma.response.upsert({
@@ -69,6 +72,11 @@ export async function applyStructuredOutput(
       }),
     ),
   );
+
+  if (slotUpdates.length > 0) {
+    const elapsedSeconds = Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
+    recordSlotUpdates(slotUpdates.length, elapsedSeconds);
+  }
 
   return {
     slotUpdates,

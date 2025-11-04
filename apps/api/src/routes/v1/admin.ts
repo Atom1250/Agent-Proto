@@ -159,6 +159,33 @@ export async function adminRoutes(app: FastifyInstance) {
     };
   });
 
+  app.get('/diagnostics', async (req) => {
+    const version = process.env.APP_VERSION ?? process.env.npm_package_version ?? 'dev';
+    const buildSha =
+      process.env.BUILD_SHA ?? process.env.GIT_COMMIT_SHA ?? process.env.VERCEL_GIT_COMMIT_SHA ?? 'local';
+
+    let databaseStatus: 'ok' | 'error' = 'ok';
+    let databaseLatencyMs: number | null = null;
+
+    const startedAt = process.hrtime.bigint();
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      databaseLatencyMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    } catch (error) {
+      databaseStatus = 'error';
+      req.log.error({ err: error }, 'diagnostics database check failed');
+    }
+
+    return {
+      version,
+      buildSha,
+      database: {
+        status: databaseStatus,
+        latencyMs: databaseLatencyMs,
+      },
+    };
+  });
+
   app.get<{ Params: { id: string } }>('/sessions/:id/responses', async (req, reply) => {
     const { id } = req.params;
 

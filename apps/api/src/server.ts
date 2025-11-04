@@ -1,5 +1,8 @@
+import { randomUUID } from 'node:crypto';
+
 import Fastify from 'fastify';
 type HealthResponse = { status: 'ok' };
+import { getMetricsSnapshot, metricsContentType } from './lib/metrics';
 import { sessionsRoutes } from './routes/v1/sessions';
 import { adminRoutes } from './routes/v1/admin';
 import { realtimeRoutes } from './routes/v1/realtime';
@@ -44,6 +47,24 @@ async function buildServer() {
 
   const app = Fastify({
     logger,
+    genReqId(request) {
+      const header = request.headers['x-request-id'];
+      const incoming = Array.isArray(header) ? header[0] : header;
+      const provided = typeof incoming === 'string' ? incoming.trim() : '';
+      return provided || randomUUID();
+    },
+    requestIdHeader: 'x-request-id',
+    requestIdLogLabel: 'requestId',
+  });
+
+  app.addHook('onRequest', async (req, reply) => {
+    const traceHeader = req.headers['x-trace-id'];
+    const incoming = Array.isArray(traceHeader) ? traceHeader[0] : traceHeader;
+    const traceId = typeof incoming === 'string' && incoming.trim() ? incoming.trim() : randomUUID();
+    reply.header('x-request-id', req.id);
+    reply.header('x-trace-id', traceId);
+    (req as any).traceId = traceId;
+    req.log = req.log.child({ requestId: req.id, traceId });
   });
 
   const allowedOrigin = process.env.WEB_APP_ORIGIN ?? 'http://localhost:3000';
@@ -157,6 +178,13 @@ async function buildServer() {
   });
 
   app.register(async (v1) => {
+    v1.get('/metrics', async (_req, reply) => {
+      const payload = getMetricsSnapshot();
+      reply.header('Content-Type', metricsContentType);
+      reply.header('Cache-Control', 'no-store');
+      return reply.send(payload);
+    });
+
     await sessionsRoutes(v1);
     await v1.register(adminRoutes, { prefix: '/admin' });
     await realtimeRoutes(v1);

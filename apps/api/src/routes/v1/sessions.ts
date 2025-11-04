@@ -4,8 +4,15 @@ import { Buffer } from 'node:buffer';
 import type { StructuredOutput } from '@agent-proto/shared';
 
 import { getAttachmentService } from '../../lib/attachments';
+import { recordSessionStart, recordTurnHandled } from '../../lib/metrics';
 import { prisma } from '../../lib/prisma';
 import { applyStructuredOutput } from '../../lib/structuredOutput';
+
+const NS_PER_SECOND = 1_000_000_000;
+
+function durationSeconds(startedAt: bigint) {
+  return Number(process.hrtime.bigint() - startedAt) / NS_PER_SECOND;
+}
 
 async function computeRequiredSlotProgress(sessionId: string, templateId: string | null) {
   if (!templateId) {
@@ -32,6 +39,7 @@ const attachmentService = getAttachmentService();
 
 export async function sessionsRoutes(app: FastifyInstance) {
   app.post<{ Body: { clientId: string; templateId: string } }>('/sessions', async (req, reply) => {
+    const startedAt = process.hrtime.bigint();
     const { clientId, templateId } = req.body ?? {};
     if (!clientId || !templateId) {
       return reply.code(400).send({ error: 'clientId and templateId are required' });
@@ -47,6 +55,7 @@ export async function sessionsRoutes(app: FastifyInstance) {
     });
 
     app.log.info({ sessionId: session.id, clientId, templateId }, 'session created');
+    recordSessionStart(durationSeconds(startedAt));
     return reply.code(201).send({ sessionId: session.id });
   });
 
@@ -75,6 +84,7 @@ export async function sessionsRoutes(app: FastifyInstance) {
     Params: { id: string };
     Body: { content?: string; structuredOutput?: StructuredOutput | null };
   }>('/sessions/:id/messages', async (req, reply) => {
+    const startedAt = process.hrtime.bigint();
     const { id } = req.params;
 
     const session = await prisma.session.findUnique({
@@ -113,7 +123,7 @@ export async function sessionsRoutes(app: FastifyInstance) {
 
     const progress = await computeRequiredSlotProgress(id, session.templateId);
 
-    return reply.code(201).send({
+    const responsePayload = {
       message: {
         id: message.id,
         role: message.role,
@@ -122,7 +132,10 @@ export async function sessionsRoutes(app: FastifyInstance) {
       },
       percentRequiredSlotsFilled: progress.percentFilled,
       missing_required_slots: progress.missingRequiredSlots,
-    });
+    };
+
+    recordTurnHandled(1, durationSeconds(startedAt));
+    return reply.code(201).send(responsePayload);
   });
 
   app.post<{
@@ -222,6 +235,7 @@ export async function sessionsRoutes(app: FastifyInstance) {
           structuredOutput?: StructuredOutput | null;
         }>;
   }>('/sessions/:id/voice-turns', async (req, reply) => {
+    const startedAt = process.hrtime.bigint();
     const { id } = req.params;
 
     const session = await prisma.session.findUnique({ where: { id } });
@@ -312,10 +326,13 @@ export async function sessionsRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'no valid voice turns provided' });
     }
 
-    return {
+    const result = {
       saved: savedMessages,
       missing_required_slots: Array.from(aggregateMissing),
     };
+
+    recordTurnHandled(savedMessages, durationSeconds(startedAt));
+    return result;
   });
 }
 

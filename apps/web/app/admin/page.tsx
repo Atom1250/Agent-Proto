@@ -378,6 +378,22 @@ export default function AdminPage() {
         </form>
       </section>
 
+      {isUnlocked ? (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <a
+            href="/admin/diagnostics"
+            style={{
+              fontSize: 14,
+              color: '#1d4ed8',
+              fontWeight: 600,
+              textDecoration: 'none',
+            }}
+          >
+            View diagnostics →
+          </a>
+        </div>
+      ) : null}
+
       {isUnlocked && sessionsPayload ? (
         <div style={{ display: 'grid', gap: 24, gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 2fr)' }}>
           <section
