@@ -11,12 +11,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "prisma db seed"
+    "preprisma:seed": "pnpm run prisma:generate",
+    "prisma:seed": "prisma db seed",
+    "eval:orchestrator": "tsx eval/orchestrator/run.ts"
   },
   "dependencies": {
     "fastify": "^4.26.2",
     "@agent-proto/shared": "workspace:*",
-    "@prisma/client": "^5.20.0"
+    "@prisma/client": "^5.22.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
@@ -25,7 +27,7 @@
     "eslint": "^8.57.0",
     "tsx": "^4.7.0",
     "typescript": "^5.6.3",
-    "prisma": "^5.20.0",
+    "prisma": "^5.22.0",
     "pino-pretty": "^11.2.2"
   },
   "prisma": {
