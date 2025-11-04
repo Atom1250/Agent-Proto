@@ -1,5 +1,3 @@
-import type { StructuredOutput, SlotUpdate } from '@agent-proto/shared';
-
 import type { PrismaClient } from '@prisma/client';
 
 import { recordSlotUpdates } from './metrics';
@@ -13,6 +11,15 @@ async function getPrisma(): Promise<PrismaClient> {
   }
   return prismaClient;
 }
+
+export type SlotUpdate = { slotKey: string; value: unknown };
+
+export type StructuredOutput = {
+  slot_updates?: Array<{ slotKey?: string; slot_key?: string; value?: unknown }>;
+  slotUpdates?: Array<{ slotKey?: string; slot_key?: string; value?: unknown }>;
+  missing_required_slots?: unknown;
+  missingRequiredSlots?: unknown;
+};
 
 export type NormalizedStructuredOutput = {
   slotUpdates: SlotUpdate[];

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { StructuredOutput } from '@agent-proto/shared';
+import type { StructuredOutput } from '../../lib/structuredOutput';
 
 import { getAttachmentService } from '../../lib/attachments';
 import { recordSessionStart, recordTurnHandled } from '../../lib/metrics';

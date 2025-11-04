@@ -2,10 +2,18 @@
 
 import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { StructuredOutput } from '@agent-proto/shared';
 import Link from 'next/link';
 
 import { apiUrl } from '../../../lib/api';
+
+type StructuredOutput = {
+  slot_updates?: Array<{ slotKey?: string; slot_key?: string; value?: unknown }>;
+  slotUpdates?: Array<{ slotKey?: string; slot_key?: string; value?: unknown }>;
+  next_question?: unknown;
+  nextQuestion?: unknown;
+  missing_required_slots?: unknown;
+  missingRequiredSlots?: unknown;
+};
 
 type PageProps = {
   params: { sessionId: string };
