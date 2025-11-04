@@ -143,8 +143,15 @@ async function buildServer() {
     return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 120;
   })();
 
+  const rateBucketMaxEntries = (() => {
+    const raw = process.env.RATE_LIMIT_MAX_BUCKETS;
+    const parsed = raw ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 10_000;
+  })();
+
   type RateState = { count: number; resetAt: number };
   const rateBuckets = new Map<string, RateState>();
+  let lastRateBucketSweep = 0;
 
   app.addHook('onRequest', async (req, reply) => {
     const url = req.raw.url ?? '';
@@ -153,6 +160,30 @@ async function buildServer() {
     }
 
     const now = Date.now();
+    if (now - lastRateBucketSweep > rateLimitWindowMs) {
+      for (const [key, state] of rateBuckets) {
+        if (state.resetAt <= now) {
+          rateBuckets.delete(key);
+        }
+      }
+      lastRateBucketSweep = now;
+    }
+
+    while (rateBuckets.size > rateBucketMaxEntries) {
+      let oldestKey: string | undefined;
+      let oldestReset = Infinity;
+      for (const [key, state] of rateBuckets) {
+        if (state.resetAt < oldestReset) {
+          oldestReset = state.resetAt;
+          oldestKey = key;
+        }
+      }
+      if (!oldestKey) {
+        break;
+      }
+      rateBuckets.delete(oldestKey);
+    }
+
     const forwarded = req.headers['x-forwarded-for'];
     let forwardedIp: string | null = null;
     if (Array.isArray(forwarded)) {
