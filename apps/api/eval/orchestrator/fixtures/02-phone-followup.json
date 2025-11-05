@@ -1,0 +1,17 @@
+{
+  "id": "phone-followup",
+  "description": "User supplies a phone number but leaves mailing address outstanding.",
+  "utterance": "Sure, my cell is (415) 555-0102 but I haven't decided on the new address yet.",
+  "goldenStructuredOutput": {
+    "slotUpdates": [
+      { "slotKey": "contact_phone", "value": "+14155550102" }
+    ],
+    "missingRequiredSlots": ["mailing_address"]
+  },
+  "expected": {
+    "slotUpdates": [
+      { "slotKey": "contact_phone", "value": "+14155550102" }
+    ],
+    "missingRequiredSlots": ["mailing_address"]
+  }
+}
