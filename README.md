@@ -45,6 +45,22 @@ database before using the "Start session" flow:
 3. When starting a session, provide the client `id` from step 2 and the
    template `id` produced by the seed script.
 
+### Regenerating the Prisma client (monorepo/hoisted installs)
+
+If you encounter errors indicating that `@prisma/client` has not been
+generated, run the helper script from the repository root to clear cached
+artifacts, rebuild the package, and regenerate the client in the hoisted
+workspace location:
+
+```bash
+pnpm prisma:regenerate
+```
+
+The script removes `node_modules/.prisma`, rebuilds `@prisma/client`, and
+executes `pnpm --filter @agent-proto/api exec prisma generate`. You can
+confirm the client exists by verifying the generated files under
+`node_modules/.pnpm/@prisma+client@<version>.../node_modules/@prisma/client`.
+
 ## Env
 Copy `.env.example` to `.env` and adjust values as needed.
 
