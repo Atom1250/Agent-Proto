@@ -28,22 +28,53 @@ Runs `apps/web` and `apps/api` concurrently.
 
 ### Bootstrapping required data
 
-Session creation requires existing Client and Template records. Populate the
-database before using the "Start session" flow:
+The “Start session” screen now includes a **Quick setup** card that:
 
-1. Run the Prisma seed to insert the default onboarding template (e.g.
-   `individual_kyc_v1`). The script automatically regenerates the Prisma
-   client if needed:
+- Seeds the default onboarding template (`individual_kyc_v1`) on first load.
+- Lets you generate a client record with one click.
+- Presents all templates in a dropdown so you can choose without copying IDs.
 
+Before opening the web app, make sure the API can talk to a database. If you
+need a detailed runbook for local Postgres + Prisma, follow these steps from
+the repository root:
+
+1. **Locate the Prisma schema and place `.env` alongside it.**
+   ```bash
+   find . -name schema.prisma
+   # expected path: ./apps/api/prisma/schema.prisma
+   cat > apps/api/prisma/.env <<'EOF'
+   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/agent_proto?schema=public"
+   EOF
+   ```
+
+2. **Start Postgres (optional if you already have one running).**
+   ```bash
+   docker run --name agent-proto-postgres -d \
+     -e POSTGRES_PASSWORD=postgres \
+     -e POSTGRES_DB=agent_proto \
+     -p 5432:5432 postgres:16
+   ```
+
+3. **Apply migrations and generate the Prisma client in the hoisted workspace.**
+   ```bash
+   pnpm --filter @agent-proto/api exec prisma migrate deploy \
+     || pnpm --filter @agent-proto/api exec prisma migrate dev --name init
+   pnpm prisma:regenerate
+   ```
+
+4. **Seed the default onboarding template.**
    ```bash
    pnpm --filter @agent-proto/api run prisma:seed
    ```
 
-2. Create at least one client record (via Prisma Studio, `psql`, or your
-   preferred admin tool) and copy its generated `id`.
+5. **(Optional) Create or inspect clients in Prisma Studio.**
+   ```bash
+   pnpm --filter @agent-proto/api exec prisma studio
+   ```
 
-3. When starting a session, provide the client `id` from step 2 and the
-   template `id` produced by the seed script.
+After completing these steps, visit `/sessions/start` in the web app. Use the
+“Generate client ID” button, pick a template from the dropdown, and submit the
+form to launch a session.
 
 ### Regenerating the Prisma client (monorepo/hoisted installs)
 

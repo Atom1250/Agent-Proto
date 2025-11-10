@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { StructuredOutput } from '../../lib/structuredOutput';
 
 import { getAttachmentService } from '../../lib/attachments';
+import { ensureDefaultTemplate, listTemplates } from '../../lib/bootstrap';
 import { recordSessionStart, recordTurnHandled } from '../../lib/metrics';
 import { prisma } from '../../lib/prisma';
 import { applyStructuredOutput } from '../../lib/structuredOutput';
@@ -54,6 +55,36 @@ async function computeRequiredSlotProgress(sessionId: string, templateId: string
 const attachmentService = getAttachmentService();
 
 export async function sessionsRoutes(app: FastifyInstance) {
+  app.get('/templates', async (_req, reply) => {
+    const templates = await listTemplates();
+    return reply.send({ templates });
+  });
+
+  app.post('/setup/bootstrap', async (_req, reply) => {
+    const ensuredTemplate = await ensureDefaultTemplate();
+    const templates = await listTemplates();
+
+    return reply.send({
+      templates,
+      ensuredTemplateId: ensuredTemplate.id,
+    });
+  });
+
+  app.post<{ Body: { name?: string | null; email?: string | null } }>('/clients', async (req, reply) => {
+    const requestedName = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const name = requestedName || `Client ${new Date().toISOString()}`;
+    const email = typeof req.body?.email === 'string' && req.body.email.trim() ? req.body.email.trim() : null;
+
+    const client = await prisma.client.create({
+      data: { name, email },
+      select: { id: true, name: true, email: true, createdAt: true },
+    });
+
+    app.log.info({ clientId: client.id }, 'client created via quick-start');
+
+    return reply.code(201).send({ client });
+  });
+
   app.post<{ Body: { clientId: string; templateId: string } }>('/sessions', async (req, reply) => {
     const startedAt = process.hrtime.bigint();
     const { clientId, templateId } = req.body ?? {};
