@@ -10,11 +10,13 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "dev": "pnpm -r --stream --filter ./apps/* dev",
+    "dev": "pnpm -r --stream --filter \"./apps/*\" dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
-    "format": "pnpm -r format"
+    "format": "pnpm -r format",
+    "prisma:generate": "pnpm --filter @agent-proto/api exec prisma generate",
+    "prisma:regenerate": "node scripts/regenerate-prisma-client.mjs"
   }
 }
 
