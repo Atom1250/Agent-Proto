@@ -171,12 +171,6 @@ export async function sessionsRoutes(app: FastifyInstance) {
     const progress = await computeRequiredSlotProgress(id, session.templateId);
 
     const responsePayload = {
-      message: {
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        createdAt: message.createdAt,
-      },
       percentRequiredSlotsFilled: progress.percentFilled,
       missing_required_slots: progress.missingRequiredSlots,
     };
